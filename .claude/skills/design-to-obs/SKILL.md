@@ -67,3 +67,11 @@ when they ask, and never on a design that's in a scene they're live on.
 
 The tools report this clearly. Ask the user to open OBS and check Tools → WebSocket Server Settings →
 "Enable WebSocket server". The password is read from the local OBS config automatically, so no other setup is needed.
+
+## Changing the tools themselves
+
+If the user wants the `obs-design-*` tools to behave differently (a new option, a bug fix), change the server's
+source code. Run `claude mcp get obs`: the server's args point to `<repo>/build/index.js`, and the repo root is the
+folder above `build`. Edit the TypeScript in `<repo>/src` (the design tools are in `src/tools/design.ts`), then run
+`npm run build` and `npm test` in the repo. The running server keeps the old code until it restarts, so ask the user
+to reconnect it with `/mcp` or start a new session before testing the change.
