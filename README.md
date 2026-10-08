@@ -3,6 +3,9 @@
 An MCP server for OBS Studio that lets Claude control OBS through the OBS WebSocket protocol, and preview designs
 (overlays, lower thirds, graphics, video loops) in OBS straight away.
 
+This is a fork of [royshil/obs-mcp](https://github.com/royshil/obs-mcp) that adds the design preview tools, image
+screenshots and a more reliable OBS connection.
+
 ## Features
 
 - Design preview: send HTML, a Claude Design export (.zip/.html), an image, a video or a URL to OBS, see a
@@ -51,7 +54,7 @@ An MCP server for OBS Studio that lets Claude control OBS through the OBS WebSoc
 
 ## Design preview workflow
 
-Ask Claude something like "put my lower third export from Downloads into OBS over the Benchmarkers scene". The
+Ask Claude something like "put my lower third export from Downloads into OBS over my main scene". The
 `design-to-obs` skill in `.claude/skills/` guides Claude through it. To use it outside this repo, link it into your
 user skills:
 
