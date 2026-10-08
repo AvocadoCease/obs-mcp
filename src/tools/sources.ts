@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { OBSWebSocketClient } from "../client.js";
 import { z } from "zod";
+import { captureScreenshot } from "../screenshot.js";
 
 export async function initialize(server: McpServer, client: OBSWebSocketClient): Promise<void> {
   // GetSourceActive tool
@@ -43,33 +44,28 @@ export async function initialize(server: McpServer, client: OBSWebSocketClient):
   // GetSourceScreenshot tool
   server.tool(
     "obs-get-source-screenshot",
-    "Gets a Base64-encoded screenshot of a source",
+    "Screenshot a source or scene and return it as an image you can look at. Pass a scene name to see exactly what that scene outputs.",
     {
-      sourceName: z.string().optional().describe("Name of the source to take a screenshot of"),
+      sourceName: z.string().optional().describe("Name of the source or scene to take a screenshot of"),
       sourceUuid: z.string().optional().describe("UUID of the source to take a screenshot of"),
-      imageFormat: z.string().describe("Image compression format to use"),
-      imageWidth: z.number().optional().describe("Width to scale the screenshot to"),
+      imageFormat: z.string().optional().describe("Image compression format to use (default: png)"),
+      imageWidth: z.number().optional().describe("Width to scale the screenshot to (default: 1280, aspect ratio is kept)"),
       imageHeight: z.number().optional().describe("Height to scale the screenshot to"),
       imageCompressionQuality: z.number().optional().describe("Compression quality to use (0-100, -1 for default)")
     },
     async ({ sourceName, sourceUuid, imageFormat, imageWidth, imageHeight, imageCompressionQuality }) => {
       try {
-        const response = await client.sendRequest("GetSourceScreenshot", {
+        const image = await captureScreenshot(client, {
           sourceName,
           sourceUuid,
           imageFormat,
-          imageWidth,
+          imageWidth: imageWidth ?? (imageHeight ? undefined : 1280),
           imageHeight,
           imageCompressionQuality
         });
-        
+
         return {
-          content: [
-            {
-              type: "text",
-              text: `Screenshot data: ${response.imageData.substring(0, 100)}...`
-            }
-          ]
+          content: [image]
         };
       } catch (error) {
         return {
