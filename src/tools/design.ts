@@ -279,26 +279,61 @@ function startWatching(client: OBSWebSocketClient, name: string, watchPath: stri
   }
 }
 
+interface ShownScene {
+  message: string;
+  // Puts back whatever OBS was showing before, for previews that should not stay on screen
+  restore: () => Promise<void>;
+}
+
 /**
  * Show the scene in OBS without disrupting a live show: while streaming or recording, the
  * program output is left alone and the scene goes to the Studio Mode preview instead (if enabled).
+ *
+ * HTML designs only render while OBS is showing them, so even when the user doesn't want to switch
+ * scenes the preview has to be on screen for the screenshot. With stay = false it is shown just long
+ * enough to capture and restore() switches back.
  */
-async function showScene(client: OBSWebSocketClient, sceneName: string): Promise<string> {
+async function showScene(client: OBSWebSocketClient, sceneName: string, stay: boolean): Promise<ShownScene> {
   const [{ outputActive: streaming }, { outputActive: recording }, { studioModeEnabled }] = await Promise.all([
     client.sendRequest("GetStreamStatus"),
     client.sendRequest("GetRecordStatus"),
     client.sendRequest("GetStudioModeEnabled"),
   ]);
+  const keepAsIs = async () => {};
 
   if (studioModeEnabled) {
+    const { currentPreviewSceneName } = await client.sendRequest("GetCurrentPreviewScene");
     await client.sendRequest("SetCurrentPreviewScene", { sceneName });
-    return `Loaded "${sceneName}" into the Studio Mode preview.`;
+    if (stay) {
+      return { message: `Loaded "${sceneName}" into the Studio Mode preview.`, restore: keepAsIs };
+    }
+    return {
+      message: `Showed "${sceneName}" in the Studio Mode preview for the screenshot, then put "${currentPreviewSceneName}" back.`,
+      restore: async () => {
+        await client.sendRequest("SetCurrentPreviewScene", { sceneName: currentPreviewSceneName });
+      },
+    };
   }
   if (streaming || recording) {
-    return `OBS is ${streaming ? "streaming" : "recording"}, so the live scene was not switched. Enable Studio Mode to preview designs while live.`;
+    return {
+      message:
+        `OBS is ${streaming ? "streaming" : "recording"}, so the live scene was not switched. HTML designs only render ` +
+        "while on screen, so the screenshot may be blank. Enable Studio Mode to preview designs while live.",
+      restore: keepAsIs,
+    };
   }
+
+  const { currentProgramSceneName } = await client.sendRequest("GetCurrentProgramScene");
   await client.sendRequest("SetCurrentProgramScene", { sceneName });
-  return `Switched OBS to "${sceneName}".`;
+  if (stay || currentProgramSceneName === sceneName) {
+    return { message: `Switched OBS to "${sceneName}".`, restore: keepAsIs };
+  }
+  return {
+    message: `Showed "${sceneName}" briefly for the screenshot, then switched OBS back to "${currentProgramSceneName}".`,
+    restore: async () => {
+      await client.sendRequest("SetCurrentProgramScene", { sceneName: currentProgramSceneName });
+    },
+  };
 }
 
 async function captureFrames(client: OBSWebSocketClient, sceneName: string, frames: number, intervalMs: number, imageWidth: number) {
@@ -347,7 +382,7 @@ export async function initialize(server: McpServer, client: OBSWebSocketClient):
       fit: z.enum(["contain", "stretch", "none"]).optional().describe("How to size the design on the canvas: contain (default) keeps aspect ratio, stretch fills it, none uses native size at the top-left"),
       transparent: z.boolean().optional().describe("Force a transparent page background for HTML so it overlays the scene (default: true)"),
       solo: z.boolean().optional().describe("Hide other designs in the scene so only this one shows (default: true)"),
-      show: z.boolean().optional().describe("Switch OBS to the scene (default: true). Never switches the live program while streaming/recording."),
+      show: z.boolean().optional().describe("Leave OBS on the preview scene afterwards (default: true). With false, the scene is shown only for the screenshot and OBS switches back. Never switches the live program while streaming/recording."),
       watch: z.boolean().optional().describe("Reload in OBS whenever the design's files change (default: true)"),
       waitMs: z.number().optional().describe("How long to let the design load/animate before the screenshot (default: 1500)"),
       frames: z.number().min(1).max(6).optional().describe("Number of screenshots to take, to check animations (default: 1)"),
@@ -443,10 +478,16 @@ export async function initialize(server: McpServer, client: OBSWebSocketClient):
         const watcher = args.watch === false || !design.watchPath ? undefined : startWatching(client, args.name, design.watchPath);
         designs.set(args.name, { inputName, kind: design.kind, target: design.target, watcher });
 
-        const showMessage = args.show === false ? `Design is in "${sceneName}" (scene not switched).` : await showScene(client, sceneName);
+        const shown = await showScene(client, sceneName, args.show !== false);
+        const showMessage = shown.message;
 
-        await sleep(args.waitMs ?? 1500);
-        const images = await captureFrames(client, sceneName, args.frames ?? 1, args.frameIntervalMs ?? 500, 1280);
+        let images;
+        try {
+          await sleep(args.waitMs ?? 1500);
+          images = await captureFrames(client, sceneName, args.frames ?? 1, args.frameIntervalMs ?? 500, 1280);
+        } finally {
+          await shown.restore();
+        }
 
         const lines = [
           `Loaded "${inputName}" (${design.kind}) from ${design.target}`,
